@@ -1,0 +1,12 @@
+# Model 3 CAN to VSS Signal Mappings - Simplified for testing
+# Using DI_vehicleSpeed which actually exists in candump.log (message 0x257)
+
+mappings:
+  - signal: Vehicle.Speed
+    source:
+      type: dbc
+      name: DI_vehicleSpeed
+    datatype: float
+    interval_ms: 1000
+    transform:
+      code: "x"
