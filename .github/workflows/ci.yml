@@ -170,8 +170,7 @@ jobs:
             libgrpc++-dev \
             libgoogle-glog-dev \
             libyaml-cpp-dev \
-            can-utils \
-            docker.io
+            can-utils
 
       - name: Set up vcan interface
         run: |
