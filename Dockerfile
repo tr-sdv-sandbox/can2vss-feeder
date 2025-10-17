@@ -132,6 +132,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Copy the stripped binary from builder
 COPY --from=builder /app/build/can2vss-feeder /usr/local/bin/
 
+# Copy shared libraries from builder stage
+COPY --from=builder /usr/local/lib/*.so* /usr/local/lib/
+
+# Update library cache
+RUN ldconfig
+
 # Create non-root user
 RUN useradd -m -u 1000 -s /bin/false appuser
 
