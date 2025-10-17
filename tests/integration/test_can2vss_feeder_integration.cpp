@@ -473,6 +473,9 @@ TEST_F(Can2VssFeederIntegrationTest, TeslaCANToKuksa) {
         LOG(INFO) << "Successfully received and decoded CAN data!";
     }
 
+    // Stop client to avoid hanging on destruction
+    client->stop();
+
     // Stop feeder
     StopFeeder();
 }

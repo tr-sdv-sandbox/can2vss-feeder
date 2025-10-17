@@ -1,0 +1,27 @@
+# Build artifacts
+build/
+*.o
+*.a
+*.so
+
+# Git
+.git/
+.gitignore
+.github/
+
+# Documentation
+*.md
+docs/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Test files
+tests/
+
+# Misc
+.DS_Store
+*.log

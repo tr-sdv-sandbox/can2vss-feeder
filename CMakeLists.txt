@@ -42,8 +42,8 @@ if(NOT vssdag_FOUND)
 endif()
 
 # Find or add libkuksa-cpp
-find_package(kuksa-cpp QUIET)
-if(NOT kuksa-cpp_FOUND)
+find_package(kuksa_cpp QUIET)
+if(NOT kuksa_cpp_FOUND)
     # Check parent directory for development
     if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../libkuksa-cpp/CMakeLists.txt")
         message(STATUS "Using libkuksa-cpp from parent directory")
@@ -62,8 +62,8 @@ add_executable(can2vss-feeder
 
 target_link_libraries(can2vss-feeder
     PRIVATE
-        vssdag
-        kuksa_cpp
+        vss::dag
+        kuksa::cpp
         glog::glog
         yaml-cpp
         absl::status
@@ -90,7 +90,7 @@ if(CAN2VSS_BUILD_TESTS)
 
     target_link_libraries(test_can2vss_feeder_integration
         PRIVATE
-            kuksa_cpp
+            kuksa::cpp
             glog::glog
             GTest::gtest
             GTest::gtest_main

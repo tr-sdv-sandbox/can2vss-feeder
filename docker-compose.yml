@@ -1,0 +1,40 @@
+version: '3.8'
+
+services:
+  # KUKSA databroker
+  databroker:
+    image: ghcr.io/eclipse-kuksa/kuksa-databroker:0.6.0
+    container_name: kuksa-databroker
+    ports:
+      - "55555:55555"
+    volumes:
+      - ./build/tesla_vss.json:/vss/tesla_vss.json:ro
+    command: --vss /vss/tesla_vss.json
+    networks:
+      - can2vss-net
+
+  # can2vss-feeder
+  can2vss-feeder:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: can2vss-feeder
+    depends_on:
+      - databroker
+    network_mode: host
+    privileged: true
+    environment:
+      - KUKSA_ADDRESS=localhost:55555
+      - CAN_INTERFACE=vcan0
+    volumes:
+      - ./tests/integration/test_data/Model3CAN.dbc:/app/config/vehicle.dbc:ro
+      - ./tests/integration/test_data/model3_mappings_dag.yaml:/app/config/mappings.yaml:ro
+    command:
+      - /app/config/vehicle.dbc
+      - /app/config/mappings.yaml
+      - vcan0
+      - localhost:55555
+
+networks:
+  can2vss-net:
+    driver: bridge

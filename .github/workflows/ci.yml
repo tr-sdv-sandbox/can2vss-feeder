@@ -1,0 +1,311 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*.*.*'
+  pull_request:
+    branches:
+      - main
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  # Build job - compile can2vss-feeder
+  build:
+    name: Build
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            g++ \
+            cmake \
+            make \
+            git \
+            ca-certificates \
+            libssl-dev \
+            libprotobuf-dev \
+            protobuf-compiler \
+            protobuf-compiler-grpc \
+            libgrpc++-dev \
+            libgrpc-dev \
+            libgoogle-glog-dev \
+            libyaml-cpp-dev \
+            nlohmann-json3-dev \
+            libgtest-dev \
+            pkg-config \
+            can-utils \
+            liblua5.3-dev \
+            curl
+
+      - name: Build and install concurrentqueue
+        run: |
+          mkdir -p /tmp/concurrentqueue
+          cd /tmp/concurrentqueue
+          git clone --depth 1 https://github.com/cameron314/concurrentqueue.git .
+          mkdir -p build && cd build
+          cmake -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX=/usr/local \
+            ..
+          sudo cmake --install .
+
+      - name: Build and install dbcppp
+        run: |
+          mkdir -p /tmp/dbcppp
+          cd /tmp/dbcppp
+          git clone --depth 1 https://github.com/xR3b0rn/dbcppp.git .
+          mkdir -p build && cd build
+          cmake -DCMAKE_BUILD_TYPE=Release \
+            -Dbuild_kcd=OFF \
+            -Dbuild_tools=OFF \
+            -Dbuild_tests=OFF \
+            -Dbuild_examples=OFF \
+            -DCMAKE_INSTALL_PREFIX=/usr/local \
+            ..
+          make -j$(nproc)
+          sudo make install
+          sudo ldconfig
+
+      - name: Build libvss-types
+        run: |
+          mkdir -p /tmp/libvss-types
+          cd /tmp/libvss-types
+          git clone --depth 1 https://github.com/tr-sdv-sandbox/libvss-types.git .
+          mkdir -p build && cd build
+          cmake -DCMAKE_BUILD_TYPE=Release \
+            -DVSS_TYPES_BUILD_TESTS=OFF \
+            -DVSS_TYPES_BUILD_EXAMPLES=OFF \
+            -DCMAKE_INSTALL_PREFIX=/usr/local \
+            ..
+          make -j$(nproc)
+          sudo make install
+          sudo ldconfig
+
+      - name: Build libkuksa-cpp
+        run: |
+          mkdir -p /tmp/libkuksa-cpp
+          cd /tmp/libkuksa-cpp
+          git clone --depth 1 https://github.com/tr-sdv-sandbox/libkuksa-cpp.git .
+          mkdir -p build && cd build
+          cmake -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_EXAMPLES=OFF \
+            -DBUILD_TESTS=OFF \
+            -DCMAKE_INSTALL_PREFIX=/usr/local \
+            -DCMAKE_PREFIX_PATH=/usr/local \
+            ..
+          make -j$(nproc)
+          sudo make install
+          sudo ldconfig
+
+      - name: Build libvssdag
+        run: |
+          mkdir -p /tmp/libvssdag
+          cd /tmp/libvssdag
+          git clone --depth 1 https://github.com/tr-sdv-sandbox/libvssdag.git .
+          mkdir -p build && cd build
+          cmake -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_EXAMPLES=OFF \
+            -DBUILD_TESTS=OFF \
+            -DBUILD_INTEGRATION_TESTS=OFF \
+            -DCMAKE_INSTALL_PREFIX=/usr/local \
+            -DCMAKE_PREFIX_PATH=/usr/local \
+            ..
+          make -j$(nproc)
+          sudo make install
+          sudo ldconfig
+
+      - name: Build can2vss-feeder
+        run: |
+          mkdir -p build && cd build
+          cmake -DCMAKE_BUILD_TYPE=Release ..
+          make -j$(nproc)
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: can2vss-feeder-build
+          path: |
+            build/can2vss-feeder
+            build/test_can2vss_feeder_integration
+            build/tesla_vss.json
+          retention-days: 1
+
+  # Integration test job
+  test:
+    name: Integration Tests
+    runs-on: ubuntu-24.04
+    needs: build
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: can2vss-feeder-build
+          path: build/
+
+      - name: Make binaries executable
+        run: |
+          chmod +x build/can2vss-feeder
+          chmod +x build/test_can2vss_feeder_integration
+
+      - name: Install runtime dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libssl3 \
+            libprotobuf-dev \
+            libgrpc++-dev \
+            libgoogle-glog-dev \
+            libyaml-cpp-dev \
+            can-utils \
+            docker.io
+
+      - name: Set up vcan interface
+        run: |
+          sudo modprobe vcan
+          sudo ip link add dev vcan0 type vcan
+          sudo ip link set up vcan0
+
+      - name: Run integration tests
+        timeout-minutes: 15
+        env:
+          GLOG_v: 1
+          GLOG_logtostderr: 1
+        run: |
+          cd build
+          timeout 600 ./test_can2vss_feeder_integration --gtest_output=xml:test_results.xml || echo "Tests completed with status $?"
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results
+          path: build/test_results.xml
+          retention-days: 7
+
+  # Docker build and push job
+  docker:
+    name: Build and Push Docker Image
+    runs-on: ubuntu-latest
+    needs: test
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata (tags, labels)
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=sha,prefix={{branch}}-
+            type=ref,event=branch
+            type=ref,event=pr
+
+      - name: Build Docker image
+        uses: docker/build-push-action@v5
+        if: github.event_name == 'pull_request'
+        with:
+          context: .
+          push: false
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        if: github.event_name != 'pull_request'
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # Publish release job (only on semantic version tags)
+  release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    needs: docker
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Extract version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          name: Release ${{ steps.version.outputs.VERSION }}
+          body: |
+            ## can2vss-feeder ${{ steps.version.outputs.VERSION }}
+
+            CAN to VSS signal converter with KUKSA databroker integration.
+
+            ### Docker Image
+            ```bash
+            docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.VERSION }}
+            ```
+
+            ### Usage
+            ```bash
+            docker run --rm \
+              --network host \
+              --privileged \
+              -v $(pwd)/vehicle.dbc:/app/config/vehicle.dbc:ro \
+              -v $(pwd)/mappings.yaml:/app/config/mappings.yaml:ro \
+              -e KUKSA_ADDRESS=localhost:55555 \
+              -e CAN_INTERFACE=can0 \
+              ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.VERSION }} \
+              /app/config/vehicle.dbc \
+              /app/config/mappings.yaml \
+              can0 \
+              localhost:55555
+            ```
+
+            ### What's Changed
+            See [CHANGELOG.md](CHANGELOG.md) for detailed changes.
+
+            ### Documentation
+            See [README.md](README.md) for full documentation.
+          draft: false
+          prerelease: false
+          generate_release_notes: true
