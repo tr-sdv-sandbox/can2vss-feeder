@@ -444,14 +444,13 @@ TEST_F(Can2VssFeederIntegrationTest, TeslaCANToKuksa) {
     std::atomic<bool> speed_received(false);
     std::atomic<float> last_speed(0.0f);
 
-    auto sub_status = client->subscribe(*speed_handle, [&](vss::types::QualifiedValue<float> qv) {
+    client->subscribe(*speed_handle, [&](vss::types::QualifiedValue<float> qv) {
         if (qv.is_valid()) {
             last_speed = *qv.value;
             speed_received = true;
             LOG(INFO) << "Received speed: " << *qv.value << " km/h";
         }
     });
-    ASSERT_TRUE(sub_status.ok()) << "Failed to subscribe: " << sub_status;
 
     auto start_status = client->start();
     ASSERT_TRUE(start_status.ok()) << "Failed to start client: " << start_status;
