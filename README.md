@@ -70,4 +70,4 @@ mappings:
 
 ## License
 
-See LICENSE file for details.
+Apache 2.0
